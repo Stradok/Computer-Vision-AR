@@ -1,5 +1,22 @@
 # Computer Vision AR experiments
 
+## Phase 1 launcher (web UI)
+
+A local Node.js/Express app under `phase1/` that lists every tool below with
+a description and launches it (as a subprocess, via the project's `.venv`
+python) from the browser instead of the command line.
+
+```
+cd phase1
+npm install
+npm start
+```
+
+Then open `http://localhost:4173`. Launching a tool opens its normal
+webcam/OpenCV window same as running it from the CLI -- the web UI is just
+navigation, not a replacement for the windows themselves. Edit
+`phase1/tools.json` to add a tool as new scripts land in `src/`.
+
 ## Module 1: Portal (hand gesture)
 
 Trace a circle in the air with your index finger to open a Doctor-Strange
@@ -36,7 +53,41 @@ points come back within ~40px of each other and the loop spans at least
 Tune the thresholds at the top of `src/portal.py` if it's triggering too
 easily/rarely for your camera distance.
 
-## Module 4: Face recognition (known people)
+## Module 2: Combined detection (hands, pose, face mesh, recognition)
+
+Detection-only demo (no portal/AR effect) that runs multi-hand landmarks,
+full-body pose, face mesh (eyes/mouth/outline), and face recognition all
+in one feed. This is where multi-hand and full-body/face tracking are
+being proven out before any AR effect gets built on top -- `portal.py`
+stays single-hand and untouched by this.
+
+Setup (one-time model downloads, already done in this checkout):
+
+```
+curl -L -o models/pose_landmarker_lite.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
+curl -L -o models/face_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+```
+
+Run:
+
+```
+source .venv/bin/activate
+python src/detect.py
+```
+
+Face recognition needs a gallery -- run `enroll.py` first (see Module 3
+below); without one, `detect.py` just skips that layer and prints a note.
+
+All four detectors running together on CPU is heavy and the on-screen fps
+counter will show it. Use `--no-hands` / `--no-pose` / `--no-face` /
+`--no-recognize` to isolate what you're testing, and `--max-hands`,
+`--max-faces`, `--max-poses` to cap how many of each get tracked.
+`--no-enhance-lighting` turns off the CLAHE contrast boost applied to each
+frame before detection (helps in dim/uneven light, doesn't fix extremes).
+
+## Module 3: Face recognition (known people)
 
 Recognizes a fixed set of enrolled people (e.g. people who gave you their
 own photo) from a webcam feed or a static image, robust to appearance

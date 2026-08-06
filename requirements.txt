@@ -1,0 +1,6 @@
+opencv-contrib-python
+onnxruntime
+insightface
+numpy
+mediapipe
+pynput

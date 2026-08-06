@@ -1,0 +1,77 @@
+[
+  {
+    "id": "portal",
+    "index": "01",
+    "name": "Portal",
+    "script": "portal.py",
+    "description": "Trace a circle in the air with your index finger to open a rotating Doctor-Strange-style portal. A held fist closes it.",
+    "tag": "Hand tracking",
+    "mode": "stream",
+    "port": 5001,
+    "keys": "q quit"
+  },
+  {
+    "id": "shapes",
+    "index": "02",
+    "name": "Shapes",
+    "script": "shapes.py",
+    "description": "Pinch thumb and fingertip together to drop points in space. Three or more points close into a shape with a live filter rendered inside it.",
+    "tag": "Hand tracking",
+    "mode": "stream",
+    "port": 5002,
+    "keys": "1-4 filter | c clear | q quit"
+  },
+  {
+    "id": "frame",
+    "index": "03",
+    "name": "Finger Frame",
+    "script": "frame_game.py",
+    "description": "Hold up both hands, thumb and index forming a frame between them. A filter fills the frame live as you move it around.",
+    "tag": "Two-hand tracking",
+    "mode": "stream",
+    "port": 5003,
+    "keys": "1-4 filter | q quit"
+  },
+  {
+    "id": "detect",
+    "index": "04",
+    "name": "Detection Lab",
+    "script": "detect.py",
+    "description": "Multi-hand landmarks, full-body pose, face mesh, and face recognition, all running together in one live feed.",
+    "tag": "Multi-model",
+    "mode": "stream",
+    "port": 5004,
+    "keys": "q quit"
+  },
+  {
+    "id": "mouse",
+    "index": "05",
+    "name": "Gesture Mouse",
+    "script": "gesture_mouse.py",
+    "description": "Control your real OS cursor with hand gestures. Point to move, pinch to click and drag, hold to scroll.",
+    "tag": "System control",
+    "mode": "stream",
+    "port": 5005,
+    "keys": "m arm/disarm | q quit"
+  },
+  {
+    "id": "recognize",
+    "index": "06",
+    "name": "Face Recognition",
+    "script": "recognize.py",
+    "description": "Recognizes a fixed set of enrolled people from your webcam feed. Run the Enroll tool first to build the gallery.",
+    "tag": "Identity",
+    "mode": "stream",
+    "port": 5006,
+    "keys": "q quit"
+  },
+  {
+    "id": "enroll",
+    "index": "07",
+    "name": "Enroll",
+    "script": "enroll.py",
+    "description": "Builds the face gallery from reference photos in data/known_faces before Face Recognition can identify anyone. Batch script -- shows its log output, not a live video feed.",
+    "tag": "Identity",
+    "mode": "log"
+  }
+]
