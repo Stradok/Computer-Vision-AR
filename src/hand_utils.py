@@ -106,6 +106,25 @@ class Hand:
         # Robust to hand rotation/tilt, unlike a fixed-axis comparison.
         return float(np.linalg.norm(tip - wrist)) > float(np.linalg.norm(pip - wrist))
 
+    def normalized_shape(self) -> np.ndarray:
+        """21 landmarks translated to the wrist, scaled by hand size, and rotated so the
+        wrist->middle-MCP direction points straight up. Two hands making the *same shape*
+        land on nearly the same vector regardless of where the hand is in frame, how close
+        to the camera it is, or how the wrist is tilted -- which is what lets a recorded
+        gesture be matched by its actual shape, instead of a familiar pose (e.g. pointing)
+        misfiring just because it's held at a different angle.
+        """
+        pts = self.landmarks - self.landmarks[0]
+        hand_size = float(np.linalg.norm(self.landmarks[9] - self.landmarks[0]))
+        if hand_size < 1e-6:
+            return pts.flatten()
+        pts = pts / hand_size
+        up = pts[9]
+        angle = float(np.arctan2(up[0], -up[1]))
+        c, s = np.cos(-angle), np.sin(-angle)
+        rot = np.array([[c, -s], [s, c]], dtype=np.float32)
+        return (pts @ rot.T).flatten()
+
     def pose(self) -> str:
         extended = {f: self.is_extended(f) for f in _FINGER_TIPS}
         # Thumb is excluded from the counts: its tip-vs-wrist distance
@@ -147,7 +166,7 @@ class HandTracker:
         )
         self._landmarker = vision.HandLandmarker.create_from_options(options)
         self._timestamp_ms = 0
-        self._filters: list[_OneEuroFilter] = []
+        self._filters: dict[str, _OneEuroFilter] = {}  # keyed by handedness label, not list position
 
     def process(self, frame_bgr: np.ndarray) -> list[Hand]:
         h, w = frame_bgr.shape[:2]
@@ -158,17 +177,22 @@ class HandTracker:
 
         t = self._timestamp_ms / 1000.0
         hands: list[Hand] = []
-        for i, (lm_list, handedness) in enumerate(zip(result.hand_landmarks, result.handedness)):
-            pts = np.array([[p.x * w, p.y * h] for p in lm_list], dtype=np.float32)
-            if i >= len(self._filters):
-                self._filters.append(_OneEuroFilter())
-            pts = self._filters[i](t, pts)
+        seen_labels: set[str] = set()
+        for lm_list, handedness in zip(result.hand_landmarks, result.handedness):
             label = handedness[0].category_name if handedness else "Unknown"
+            seen_labels.add(label)
+            pts = np.array([[p.x * w, p.y * h] for p in lm_list], dtype=np.float32)
+            if label not in self._filters:
+                self._filters[label] = _OneEuroFilter()
+            pts = self._filters[label](t, pts)
             hands.append(Hand(landmarks=pts, handedness=label))
-        # Drop filter state for slots with no hand this frame, so a hand that
+        # Drop filter state for hands no longer present, so a hand that
         # re-enters the frame starts fresh instead of smoothing toward stale
-        # coordinates from before it left.
-        del self._filters[len(result.hand_landmarks):]
+        # coordinates from before it left. Keying by label (not list position)
+        # keeps each hand's smoothing state stable across frames when two
+        # hands are tracked at once, regardless of detection order.
+        for stale_label in set(self._filters) - seen_labels:
+            del self._filters[stale_label]
         return hands
 
     @staticmethod

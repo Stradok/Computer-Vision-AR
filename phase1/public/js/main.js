@@ -63,10 +63,115 @@ document.addEventListener('DOMContentLoaded', () => {
   const toolBarName = document.getElementById('tool-bar-name');
   const toolBarHint = document.getElementById('tool-bar-hint');
   const toolStopBtn = document.getElementById('tool-stop');
+  const toolSensitivity = document.getElementById('tool-sensitivity');
+  const toolSensitivitySlider = document.getElementById('tool-sensitivity-slider');
+  const toolSensitivityValue = document.getElementById('tool-sensitivity-value');
+  const toolGesturesToggle = document.getElementById('tool-gestures-toggle');
+  const gesturePanel = document.getElementById('gesture-panel');
+  const gestureRows = document.getElementById('gesture-rows');
+  const SENSITIVITY_DEFAULT = 5.0; // keep in sync with SENSITIVITY in src/gesture_mouse.py
+  const GESTURE_ACTIONS = [
+    { id: 'accel_up', label: 'Accelerate Up' },
+    { id: 'accel_down', label: 'Accelerate Down' },
+    { id: 'accel_left', label: 'Accelerate Left' },
+    { id: 'accel_right', label: 'Accelerate Right' },
+    { id: 'mute', label: 'Mute' },
+    { id: 'unmute', label: 'Unmute' },
+  ];
 
   let activeTool = null;
   let activeEventSource = null;
   let streamRetryTimer = null;
+  let gesturePanelOpen = false;
+  const gesturePollTimers = {}; // action id -> timer id, while a recording is in flight
+
+  function gestureDot(actionId) {
+    const row = gestureRows.querySelector(`[data-id="${actionId}"]`);
+    return row ? row.querySelector('.gesture-dot') : null;
+  }
+
+  function renderGestureRows() {
+    gestureRows.innerHTML = '';
+    GESTURE_ACTIONS.forEach((a) => {
+      const row = document.createElement('div');
+      row.className = 'gesture-row';
+      row.dataset.id = a.id;
+      row.innerHTML = `
+        <span class="gesture-dot" data-state="unset"></span>
+        <span class="gesture-name">${a.label}</span>
+        <button class="gesture-record" type="button">Record</button>
+        <button class="gesture-clear" type="button">Clear</button>
+      `;
+      row.querySelector('.gesture-record').addEventListener('click', () => recordGesture(a.id));
+      row.querySelector('.gesture-clear').addEventListener('click', () => clearGesture(a.id));
+      gestureRows.appendChild(row);
+    });
+  }
+
+  function fetchGestureStatus() {
+    if (!activeTool) return;
+    fetch(`/api/gesture/${activeTool.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const recorded = new Set(data.actions || []);
+        GESTURE_ACTIONS.forEach((a) => {
+          const dot = gestureDot(a.id);
+          if (!dot || dot.dataset.state === 'pending') return; // don't clobber an in-flight recording
+          dot.dataset.state = recorded.has(a.id) ? 'recorded' : 'unset';
+        });
+      })
+      .catch(() => {});
+  }
+
+  function recordGesture(actionId) {
+    if (!activeTool) return;
+    const dot = gestureDot(actionId);
+    if (dot) dot.dataset.state = 'pending';
+    fetch(`/api/gesture/${activeTool.id}/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionId }),
+    });
+    // Recording itself takes ~1.8s server-side (prep + hold) -- poll a few times after
+    // that until the file shows it saved; give up after a few tries (likely no hand
+    // was in frame during capture) rather than polling forever.
+    clearTimeout(gesturePollTimers[actionId]);
+    let attempts = 0;
+    const poll = () => {
+      attempts += 1;
+      fetch(`/api/gesture/${activeTool.id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          const recorded = new Set(data.actions || []);
+          if (recorded.has(actionId)) {
+            if (dot) dot.dataset.state = 'recorded';
+          } else if (attempts < 6) {
+            gesturePollTimers[actionId] = setTimeout(poll, 500);
+          } else if (dot) {
+            dot.dataset.state = 'unset';
+          }
+        });
+    };
+    gesturePollTimers[actionId] = setTimeout(poll, 2000);
+  }
+
+  function clearGesture(actionId) {
+    if (!activeTool) return;
+    fetch(`/api/gesture/${activeTool.id}/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionId }),
+    }).finally(fetchGestureStatus);
+  }
+
+  toolGesturesToggle.addEventListener('click', () => {
+    gesturePanelOpen = !gesturePanelOpen;
+    gesturePanel.hidden = !gesturePanelOpen;
+    toolGesturesToggle.classList.toggle('is-active', gesturePanelOpen);
+    if (gesturePanelOpen) fetchGestureStatus();
+  });
+
+  renderGestureRows();
 
   function connectStream(tool) {
     clearTimeout(streamRetryTimer);
@@ -98,6 +203,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     clearTimeout(streamRetryTimer);
     toolStream.onerror = null;
+    toolSensitivity.hidden = true;
+    toolGesturesToggle.hidden = true;
+    gesturePanel.hidden = true;
+    gesturePanelOpen = false;
+    toolGesturesToggle.classList.remove('is-active');
     activeTool = null;
     toolView.hidden = true;
     toolStream.hidden = true;
@@ -118,6 +228,19 @@ document.addEventListener('DOMContentLoaded', () => {
     toolBarHint.textContent = tool.keys || '';
     statusEl.textContent = `${tool.name} running`;
 
+    // Only gesture_mouse.py understands a "sensitivity" param -- a freshly
+    // spawned process starts back at its own default, so reset the slider
+    // to match instead of carrying over a stale value from last time.
+    toolSensitivity.hidden = tool.id !== 'mouse';
+    toolGesturesToggle.hidden = tool.id !== 'mouse';
+    gesturePanel.hidden = true;
+    gesturePanelOpen = false;
+    toolGesturesToggle.classList.remove('is-active');
+    if (tool.id === 'mouse') {
+      toolSensitivitySlider.value = SENSITIVITY_DEFAULT;
+      toolSensitivityValue.textContent = SENSITIVITY_DEFAULT.toFixed(1);
+    }
+
     if (tool.mode === 'stream') {
       toolLog.hidden = true;
       toolStream.hidden = false;
@@ -135,6 +258,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Closing/reloading the tab doesn't run our JS long enough for a normal fetch,
+  // and the launcher's child process is detached -- it survives the tab closing
+  // and keeps holding the webcam. sendBeacon fires a best-effort request that
+  // survives unload; the server doesn't care about a body for /api/stop.
+  window.addEventListener('pagehide', () => {
+    if (activeTool) navigator.sendBeacon(`/api/stop/${activeTool.id}`);
+  });
+
   stageContainer.addEventListener('keydown', (e) => {
     if (!activeTool || activeTool.mode !== 'stream') return;
     const code = e.key.length === 1 ? e.key.charCodeAt(0) : null;
@@ -143,6 +274,17 @@ document.addEventListener('DOMContentLoaded', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
+    });
+  });
+
+  toolSensitivitySlider.addEventListener('input', () => {
+    if (!activeTool || activeTool.id !== 'mouse') return;
+    const value = toolSensitivitySlider.value;
+    toolSensitivityValue.textContent = Number(value).toFixed(1);
+    fetch('/api/param/mouse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'sensitivity', value }),
     });
   });
 

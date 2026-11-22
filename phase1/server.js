@@ -121,6 +121,51 @@ app.post('/api/launch/:id', (req, res) => {
   res.json({ ok: true, pid: child.pid, mode: tool.mode, port: tool.port });
 });
 
+app.post('/api/param/:id', (req, res) => {
+  // Same relay pattern as /api/key/:id -- keeps the frontend only ever talking
+  // to :4173. Used for live-adjustable controls, e.g. the sensitivity slider.
+  const tool = TOOLS.find((t) => t.id === req.params.id);
+  if (!tool || tool.mode !== 'stream') return res.status(404).json({ error: 'not a stream tool' });
+  const { name, value } = req.body || {};
+  if (!name || value === undefined) return res.status(400).json({ error: 'name and value required' });
+  fetch(`http://127.0.0.1:${tool.port}/param?name=${encodeURIComponent(name)}&value=${encodeURIComponent(value)}`)
+    .then(() => res.json({ ok: true }))
+    .catch((err) => res.status(502).json({ error: err.message }));
+});
+
+app.get('/api/gesture/:id', (req, res) => {
+  // Reads models/gestures.json directly -- it's just a JSON file the python side
+  // writes to, no need to round-trip through the running process for a status check.
+  const gesturesPath = path.join(REPO_ROOT, 'models', 'gestures.json');
+  let recorded = {};
+  try {
+    recorded = JSON.parse(fs.readFileSync(gesturesPath, 'utf8'));
+  } catch (e) {
+    /* not recorded yet, or file doesn't exist -- empty is fine */
+  }
+  res.json({ actions: Object.keys(recorded) });
+});
+
+app.post('/api/gesture/:id/record', (req, res) => {
+  const tool = TOOLS.find((t) => t.id === req.params.id);
+  if (!tool || tool.mode !== 'stream') return res.status(404).json({ error: 'not a stream tool' });
+  const { action } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'action required' });
+  fetch(`http://127.0.0.1:${tool.port}/record?action=${encodeURIComponent(action)}`)
+    .then(() => res.json({ ok: true }))
+    .catch((err) => res.status(502).json({ error: err.message }));
+});
+
+app.post('/api/gesture/:id/clear', (req, res) => {
+  const tool = TOOLS.find((t) => t.id === req.params.id);
+  if (!tool || tool.mode !== 'stream') return res.status(404).json({ error: 'not a stream tool' });
+  const { action } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'action required' });
+  fetch(`http://127.0.0.1:${tool.port}/record?action=${encodeURIComponent(action)}&clear=1`)
+    .then(() => res.json({ ok: true }))
+    .catch((err) => res.status(502).json({ error: err.message }));
+});
+
 app.post('/api/stop/:id', (req, res) => {
   const wasRunning = stopTool(req.params.id);
   res.json({ ok: true, wasRunning });

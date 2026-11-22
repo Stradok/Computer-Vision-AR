@@ -26,6 +26,9 @@ class StreamServer:
         self._frame_lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
         self._keys: "queue.Queue[int]" = queue.Queue()
+        self._params: dict[str, float] = {}  # live-adjustable values (e.g. a sensitivity slider), set via /param
+        self._params_lock = threading.Lock()
+        self._gesture_requests: "queue.Queue[tuple[str, bool]]" = queue.Queue()  # (action, clear) from /record
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -38,6 +41,16 @@ class StreamServer:
     def poll_key(self) -> int | None:
         try:
             return self._keys.get_nowait()
+        except queue.Empty:
+            return None
+
+    def get_param(self, name: str, default: float) -> float:
+        with self._params_lock:
+            return self._params.get(name, default)
+
+    def poll_gesture_request(self) -> tuple[str, bool] | None:
+        try:
+            return self._gesture_requests.get_nowait()
         except queue.Empty:
             return None
 
@@ -76,6 +89,25 @@ class StreamServer:
                     code = qs.get("code", [None])[0]
                     if code is not None:
                         server._keys.put(int(code))
+                    self.send_response(204)
+                    self._cors()
+                    self.end_headers()
+                elif path == "/param":
+                    qs = parse_qs(urlparse(self.path).query)
+                    name = qs.get("name", [None])[0]
+                    value = qs.get("value", [None])[0]
+                    if name is not None and value is not None:
+                        with server._params_lock:
+                            server._params[name] = float(value)
+                    self.send_response(204)
+                    self._cors()
+                    self.end_headers()
+                elif path == "/record":
+                    qs = parse_qs(urlparse(self.path).query)
+                    action = qs.get("action", [None])[0]
+                    clear = qs.get("clear", ["0"])[0] == "1"
+                    if action is not None:
+                        server._gesture_requests.put((action, clear))
                     self.send_response(204)
                     self._cors()
                     self.end_headers()
