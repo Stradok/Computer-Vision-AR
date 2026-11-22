@@ -6,3 +6,8 @@ gallery/
 *_recognized.*
 models/*.task
 node_modules/
+
+# Internal notes and agent config (kept locally; archived in Stradok/Archive)
+/.claude/
+CLAUDE.md
+AGENTS.md
